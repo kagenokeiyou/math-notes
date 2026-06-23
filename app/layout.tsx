@@ -1,12 +1,21 @@
-import { Inter } from 'next/font/google';
-import { Provider } from '@/components/provider';
-import './global.css';
+import { Inter } from "next/font/google";
+import { Provider } from "@/components/provider";
+import "./global.css";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NODE_ENV == "production"
+      ? "https://kagenokeiyou.github.io/math-notes"
+      : "http://localhost:3000",
+  ),
+};
 
 const inter = Inter({
-  subsets: ['latin'],
+  subsets: ["latin"],
 });
 
-export default function Layout({ children }: LayoutProps<'/'>) {
+export default function Layout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={inter.className} suppressHydrationWarning>
       <body className="flex flex-col min-h-screen">

@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": ["node_modules/", ".source/", ".next/", "out/"],
+  "semi": true,
+  "singleQuote": true,
+  "sortImports": {
+    "newlinesBetween": false
+  },
+  "sortPackageJson": {
+    "sortScripts": true
+  },
+  "sortTailwindcss": {
+    "functions": ["cn"]
+  }
+}
