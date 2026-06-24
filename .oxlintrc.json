@@ -6,6 +6,9 @@
     "correctness": "error",
     "perf": "warn"
   },
+  "rules": {
+    "nextjs/no-img-element": "off"
+  },
   "env": {
     "builtin": true
   },
