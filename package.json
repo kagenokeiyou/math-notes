@@ -38,5 +38,17 @@
     "serve": "^14.2.6",
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": ">=11",
+      "onFail": "error"
+    },
+    "runtime": {
+      "name": "node",
+      "version": ">=24",
+      "onFail": "error"
+    }
   }
 }
