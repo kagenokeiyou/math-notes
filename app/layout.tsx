@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './global.css'
 import { Provider } from '@/components/provider'
-import 'katex/dist/katex.css'
+import favicon from '@/public/favicon.png'
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -11,7 +11,7 @@ export const metadata: Metadata = {
       : 'http://localhost:3000',
   ),
   title: 'Math Notes',
-  icons: '/favicon.png',
+  icons: favicon.src,
 }
 
 const inter = Inter({

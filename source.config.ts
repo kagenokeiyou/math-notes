@@ -18,7 +18,7 @@ export const docs = defineDocs({
 
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [remarkMath],
+    remarkPlugins: (v) => [remarkMath, ...v],
     rehypePlugins: (v) => [rehypeKatex, ...v],
   },
 })
