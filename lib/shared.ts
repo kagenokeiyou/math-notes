@@ -1,7 +1,8 @@
 export const appName = 'Math Notes'
-export const docsRoute = '/docs'
-export const docsImageRoute = '/og/docs'
-export const docsContentRoute = '/llms.mdx/docs'
+export const basePath = '/math-notes'
+export const docsRoute = `${basePath}/docs`
+export const docsImageRoute = `${basePath}/og/docs`
+export const docsContentRoute = `${basePath}/llms.mdx/docs`
 
 export const gitConfig = {
   user: 'kagenokeiyou',

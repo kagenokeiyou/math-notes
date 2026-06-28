@@ -14,6 +14,7 @@ import {
   type SharedProps,
 } from 'fumadocs-ui/components/dialog/search'
 import { useI18n } from 'fumadocs-ui/contexts/i18n'
+import { basePath } from '@/lib/shared'
 
 function initOrama() {
   return create({
@@ -27,6 +28,7 @@ export default function DefaultSearchDialog(props: SharedProps) {
   const { locale } = useI18n() // (optional) for i18n
   const { search, setSearch, query } = useDocsSearch({
     client: oramaStaticClient({
+      from: `${basePath}/api/search`,
       initOrama,
       locale,
     }),

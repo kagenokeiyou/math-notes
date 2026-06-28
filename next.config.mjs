@@ -5,6 +5,7 @@ const withMDX = createMDX()
 /** @type {import('next').NextConfig} */
 const config = {
   basePath: '/math-notes',
+  assetPrefix: '/math-notes/',
   output: 'export',
   reactStrictMode: true,
   images: {
