@@ -1,29 +1,19 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "typescript",
-    "react",
-    "import",
-    "nextjs"
-  ],
-  "categories": {},
-  "env": {
-    "builtin": true
-  },
-  "settings": {
-    "react": {
-      "version": "19.2.7"
-    },
-    "tailwindcss": {
-      "callees": [
-        "clsx",
-        "cva",
-        "cn"
-      ]
-    }
-  },
   "ignorePatterns": [
     "node_modules/",
-    "dist/"
-  ]
+    ".source/",
+    ".next/",
+    "out/",
+    "next-env.d.ts",
+    "tsconfig.tsbuildinfo"
+  ],
+  "plugins": ["eslint", "typescript", "unicorn", "react", "nextjs"],
+  "categories": {
+    "correctness": "error",
+    "perf": "warn"
+  },
+  "env": {
+    "builtin": true
+  }
 }

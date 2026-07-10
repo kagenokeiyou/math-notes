@@ -1,4 +1,9 @@
-'use client';
+'use client'
+import { create } from '@orama/orama'
+import { stopwords } from '@orama/stopwords/mandarin'
+import { createTokenizer } from '@orama/tokenizers/mandarin'
+import { useDocsSearch } from 'fumadocs-core/search/client'
+import { oramaStaticClient } from 'fumadocs-core/search/client/orama-static'
 import {
   SearchDialog,
   SearchDialogClose,
@@ -9,28 +14,30 @@ import {
   SearchDialogList,
   SearchDialogOverlay,
   type SharedProps,
-} from 'fumadocs-ui/components/dialog/search';
-import { useDocsSearch } from 'fumadocs-core/search/client';
-import { oramaStaticClient } from 'fumadocs-core/search/client/orama-static';
-import { create } from '@orama/orama';
-import { useI18n } from 'fumadocs-ui/contexts/i18n';
+} from 'fumadocs-ui/components/dialog/search'
 
 function initOrama() {
   return create({
     schema: { _: 'string' },
-    // https://docs.orama.com/docs/orama-js/supported-languages
-    language: 'english',
-  });
+    components: {
+      tokenizer: createTokenizer({
+        language: 'mandarin',
+        stopWords: stopwords,
+      }),
+    },
+  })
 }
 
 export default function DefaultSearchDialog(props: SharedProps) {
-  const { locale } = useI18n(); // (optional) for i18n
   const { search, setSearch, query } = useDocsSearch({
     client: oramaStaticClient({
+      from: '/math-notes/api/search',
       initOrama,
-      locale,
+      search: {
+        tolerance: 1,
+      },
     }),
-  });
+  })
 
   return (
     <SearchDialog search={search} onSearchChange={setSearch} isLoading={query.isLoading} {...props}>
@@ -44,5 +51,5 @@ export default function DefaultSearchDialog(props: SharedProps) {
         <SearchDialogList items={query.data !== 'empty' ? query.data : null} />
       </SearchDialogContent>
     </SearchDialog>
-  );
+  )
 }

@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "node_modules/",
+    ".source/",
+    ".next/",
+    "out/",
+    "next-env.d.ts",
+    "tsconfig.tsbuildinfo"
+  ],
+  "semi": false,
+  "singleQuote": true,
+  "sortImports": {
+    "newlinesBetween": false
+  },
+  "sortPackageJson": {
+    "sortScripts": true
+  },
+  "sortTailwindcss": {
+    "functions": ["cn"]
+  }
+}
