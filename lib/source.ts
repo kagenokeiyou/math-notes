@@ -2,7 +2,7 @@ import { docs } from 'collections/server'
 import { loader } from 'fumadocs-core/source'
 import { icons } from 'lucide-react'
 import { createElement } from 'react'
-import { customIcons } from '@/components/icons'
+import { CustomIcons } from '@/components/icons'
 import { docsContentRoute, docsImageRoute, docsRoute } from './shared'
 
 export const source = loader({
@@ -12,7 +12,7 @@ export const source = loader({
   icon(icon) {
     if (!icon) return
     if (icon in icons) return createElement(icons[icon as keyof typeof icons])
-    if (icon in customIcons) return createElement(customIcons[icon as keyof typeof customIcons])
+    if (icon in CustomIcons) return createElement(CustomIcons[icon as keyof typeof CustomIcons])
   },
 })
 

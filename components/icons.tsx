@@ -1,6 +1,6 @@
 import { createLucideIcon } from 'lucide-react'
 
-const Basics = createLucideIcon('Basics', [
+export const BasicsIcon = createLucideIcon('Basics', [
   [
     'path',
     {
@@ -10,7 +10,7 @@ const Basics = createLucideIcon('Basics', [
   ],
 ])
 
-const Calculus = createLucideIcon('Calculus', [
+export const CalculusIcon = createLucideIcon('Calculus', [
   [
     'path',
     {
@@ -20,4 +20,7 @@ const Calculus = createLucideIcon('Calculus', [
   ],
 ])
 
-export const customIcons = { Basics, Calculus }
+export const CustomIcons = {
+  Basics: BasicsIcon,
+  Calculus: CalculusIcon,
+}
