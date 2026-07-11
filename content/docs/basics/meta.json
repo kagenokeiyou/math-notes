@@ -1,6 +1,6 @@
 {
+  "root": true,
   "title": "Basics",
   "description": "数学基础",
-  "icon": "Basics",
-  "root": true
+  "icon": "Basics"
 }
