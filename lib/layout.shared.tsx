@@ -1,14 +1,20 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared'
-import { appName, gitConfig } from './shared'
+import Image from 'next/image'
+import favicon from '@/public/favicon.png'
+import { appName } from './shared'
 
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: appName,
+      title: (
+        <>
+          <Image src={favicon} alt="favicon" width={20} height={20} loading="eager" />
+          <span className="font-medium max-sm:hidden">{appName}</span>
+        </>
+      ),
     },
     themeSwitch: {
       enabled: false,
     },
-    githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   }
 }
