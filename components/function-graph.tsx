@@ -31,6 +31,8 @@ export interface FunctionGraphProps {
   yTickStep?: number
   /** Whether to draw the neutral grid. Defaults to `true`. */
   showGrid?: boolean
+  /** Whether to render numeric tick labels. Defaults to `true`. */
+  showTicks?: boolean
   /** Whether to render the curve legend. Defaults to `true`. */
   showLegend?: boolean
   /** Additional classes for the outer figure. */
@@ -179,15 +181,16 @@ type NumericScale = ScaleLinear<number, number, never>
 
 const DEFAULT_DOMAIN: FunctionDomain = [-10, 10]
 const DEFAULT_ASPECT_RATIO = 1
-const SAMPLE_COUNT = 1024
-const PLOT_WIDTH = 420
+const SAMPLE_COUNT = 1000
+const PLOT_WIDTH = 360
 
 // Tick labels use a monospace face. These measured character dimensions keep
 // the outer viewBox tight while reserving enough room for negative labels.
 const AXIS_LABEL_GAP = 8
-const TICK_CHARACTER_WIDTH = 10
-const TICK_CHARACTER_HEIGHT = 18.8
+const TICK_CHARACTER_WIDTH = 6.6
+const TICK_CHARACTER_HEIGHT = 16
 const TICK_BASELINE_OFFSET = 4
+const PLOT_EDGE_PADDING = 1
 
 const DEFAULT_TICK_COUNT = 8
 const MAX_TICK_COUNT = 2000
@@ -777,6 +780,7 @@ function createGraphLayout(
   aspectRatio: number,
   xTickStep: number | undefined,
   yTickStep: number | undefined,
+  showTicks: boolean,
 ): GraphLayout {
   const yScaleForTicks = scaleLinear<number, number>().domain(yDomain)
   const yTicks = createTicks(yScaleForTicks, yDomain, yTickStep)
@@ -794,24 +798,29 @@ function createGraphLayout(
     ? estimateTickLabelWidth(formatXTick(xTicks[xTicks.length - 1]))
     : 0
 
-  // The plot is laid out first. Tick labels then expand the surrounding
-  // viewBox, keeping the plotted region's ratio independent of label width.
-  const plotLeft = Math.max(
-    AXIS_LABEL_GAP,
-    yTickLabelWidth + AXIS_LABEL_GAP,
-    firstXTickLabelWidth / 2 + AXIS_LABEL_GAP,
-  )
+  // Visible tick labels expand the surrounding viewBox without changing the
+  // plot ratio. Without labels, retain only enough padding for boundary strokes.
+  const plotLeft = showTicks
+    ? Math.max(
+        AXIS_LABEL_GAP,
+        yTickLabelWidth + AXIS_LABEL_GAP,
+        firstXTickLabelWidth / 2 + AXIS_LABEL_GAP,
+      )
+    : PLOT_EDGE_PADDING
   const plotRight = plotLeft + PLOT_WIDTH
-  const plotTop = Math.ceil(TICK_CHARACTER_HEIGHT / 2)
+  const plotTop = showTicks ? Math.ceil(TICK_CHARACTER_HEIGHT / 2) : PLOT_EDGE_PADDING
   const plotHeight = PLOT_WIDTH / aspectRatio
   if (!isFiniteNumber(plotHeight)) {
     throw new Error('aspectRatio produces an invalid plot height')
   }
   const plotBottom = plotTop + plotHeight
-  const rightMargin = Math.max(AXIS_LABEL_GAP, lastXTickLabelWidth / 2 + AXIS_LABEL_GAP)
+  const rightMargin = showTicks
+    ? Math.max(AXIS_LABEL_GAP, lastXTickLabelWidth / 2 + AXIS_LABEL_GAP)
+    : PLOT_EDGE_PADDING
 
   const viewWidth = plotRight + rightMargin
-  const viewHeight = plotBottom + AXIS_LABEL_GAP + TICK_CHARACTER_HEIGHT
+  const viewHeight =
+    plotBottom + (showTicks ? AXIS_LABEL_GAP + TICK_CHARACTER_HEIGHT : PLOT_EDGE_PADDING)
   const xScale = scaleLinear<number, number>().domain(xDomain).range([plotLeft, plotRight])
   const yScale = scaleLinear<number, number>().domain(yDomain).range([plotBottom, plotTop])
 
@@ -900,7 +909,7 @@ function getLineAnchor(screenLine: ScreenLine, layout: GraphLayout): { x: number
 
 function ErrorFallback({ message, className }: { message: string; className?: string }) {
   return (
-    <figure className={cn('not-prose mx-auto my-6 w-full max-w-xl', className)}>
+    <figure className={cn('not-prose mx-auto my-6 w-full min-w-0', className)}>
       <div
         role="alert"
         className="border-fd-border bg-fd-muted/30 text-fd-muted-foreground flex aspect-square items-center justify-center border p-6 text-center text-sm"
@@ -936,6 +945,7 @@ export default function FunctionGraph({
   xTickStep: rawXTickStep,
   yTickStep: rawYTickStep,
   showGrid: rawShowGrid = true,
+  showTicks: rawShowTicks = true,
   showLegend: rawShowLegend = true,
   className,
 }: FunctionGraphProps) {
@@ -950,9 +960,10 @@ export default function FunctionGraph({
     const xTickStep = validateTickStep(rawXTickStep, 'xTickStep') ?? tickStep
     const yTickStep = validateTickStep(rawYTickStep, 'yTickStep') ?? tickStep
     const showGrid = validateBoolean(rawShowGrid, 'showGrid', true)
+    const showTicks = validateBoolean(rawShowTicks, 'showTicks', true)
     const showLegend = validateBoolean(rawShowLegend, 'showLegend', true)
     const { curves, points, lines } = collectGraphChildren(children)
-    const layout = createGraphLayout(xDomain, yDomain, aspectRatio, xTickStep, yTickStep)
+    const layout = createGraphLayout(xDomain, yDomain, aspectRatio, xTickStep, yTickStep, showTicks)
     const clipId = `${graphId}-clip`
 
     const labeledCurves = curves.filter((curve) => curve.label?.trim())
@@ -986,7 +997,10 @@ export default function FunctionGraph({
 
     return (
       <figure
-        className={cn('not-prose text-fd-foreground mx-auto my-6 w-full max-w-xl', className)}
+        className={cn(
+          'not-prose text-fd-foreground mx-auto my-6 w-full max-w-sm min-w-0',
+          className,
+        )}
       >
         {showLegend && labeledCurves.length > 0 ? (
           <figcaption className="text-fd-foreground m-2 text-sm">
@@ -1022,7 +1036,7 @@ export default function FunctionGraph({
         <svg
           role="img"
           aria-label={accessibleTitle}
-          className="block h-auto w-full select-none"
+          className="block h-auto w-full max-w-full select-none"
           viewBox={`0 0 ${layout.viewWidth} ${layout.viewHeight}`}
           preserveAspectRatio="xMidYMid meet"
         >
@@ -1090,33 +1104,35 @@ export default function FunctionGraph({
             />
           )}
 
-          <g className="select-none">
-            {layout.xTicks.map((tick) => (
-              <text
-                key={`label-x-${tick}`}
-                x={layout.xScale(tick)}
-                y={layout.plotBottom + AXIS_LABEL_GAP}
-                fill="var(--color-fd-muted-foreground)"
-                textAnchor="middle"
-                dominantBaseline="hanging"
-                className="font-mono text-xs select-none"
-              >
-                {layout.formatXTick(tick)}
-              </text>
-            ))}
-            {layout.yTicks.map((tick) => (
-              <text
-                key={`label-y-${tick}`}
-                x={layout.plotLeft - AXIS_LABEL_GAP}
-                y={layout.yScale(tick) + TICK_BASELINE_OFFSET}
-                fill="var(--color-fd-muted-foreground)"
-                textAnchor="end"
-                className="font-mono text-xs select-none"
-              >
-                {layout.formatYTick(tick)}
-              </text>
-            ))}
-          </g>
+          {showTicks ? (
+            <g className="select-none">
+              {layout.xTicks.map((tick) => (
+                <text
+                  key={`label-x-${tick}`}
+                  x={layout.xScale(tick)}
+                  y={layout.plotBottom + AXIS_LABEL_GAP}
+                  fill="var(--color-fd-muted-foreground)"
+                  textAnchor="middle"
+                  dominantBaseline="hanging"
+                  className="font-mono text-xs select-none"
+                >
+                  {layout.formatXTick(tick)}
+                </text>
+              ))}
+              {layout.yTicks.map((tick) => (
+                <text
+                  key={`label-y-${tick}`}
+                  x={layout.plotLeft - AXIS_LABEL_GAP}
+                  y={layout.yScale(tick) + TICK_BASELINE_OFFSET}
+                  fill="var(--color-fd-muted-foreground)"
+                  textAnchor="end"
+                  className="font-mono text-xs select-none"
+                >
+                  {layout.formatYTick(tick)}
+                </text>
+              ))}
+            </g>
+          ) : null}
 
           <g className="text-fd-foreground">
             {/* Annotation lines sit above the grid/axes and below curves. */}
