@@ -2,5 +2,6 @@
   "root": true,
   "title": "Basics",
   "description": "数学基础",
-  "icon": "Basics"
+  "icon": "Basics",
+  "pages": ["index", "elementary-functions"]
 }
