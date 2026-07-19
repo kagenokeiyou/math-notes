@@ -2,3 +2,204 @@
 title: Elementary Functions
 description: 初等函数
 ---
+
+import FunctionGraph, {
+  FunctionCurve,
+  FunctionLine,
+  FunctionPoint,
+} from '@/components/function-graph'
+
+## Constant Functions
+
+<span className="text-fd-muted-foreground">常数函数</span>
+
+$$
+y=c
+$$
+
+<FunctionGraph xDomain={[-3, 3]} yDomain={[-2, 4]} tickStep={1}>
+  <FunctionCurve fn={() => 2} label="$y=c\;(e.g.\;c=2)$" />
+</FunctionGraph>
+
+## Power Function
+
+<span className="text-fd-muted-foreground">幂函数</span>
+
+$$
+y=x^n
+$$
+
+<FunctionGraph xDomain={[-0.5, 2.5]} yDomain={[-0.5, 2.5]} tickStep={1}>
+  <FunctionCurve fn={(x) => Math.pow(x, 1)} label="$y=x$" />
+  <FunctionCurve fn={(x) => Math.pow(x, 2)} label="$y=x^2$" />
+  <FunctionCurve fn={(x) => Math.pow(x, 3)} label="$y=x^3$" />
+  <FunctionCurve fn={(x) => Math.pow(x, 1 / 2)} label="$y=\sqrt{x}$" domains={[[0, Infinity]]} />
+  <FunctionCurve fn={(x) => Math.pow(x, 1 / 3)} label="$y=\sqrt[3]{x}$" domains={[[0, Infinity]]} />
+  <FunctionCurve fn={(x) => Math.pow(x, -1)} label="$y=\frac{1}{x}$" undefinedPoints={[0]} />
+  <FunctionPoint x={1} y={1} />
+</FunctionGraph>
+
+### Identity Function
+
+<span className="text-fd-muted-foreground">恒等函数</span>
+
+$$
+y=x
+$$
+
+<FunctionGraph xDomain={[-3, 3]} yDomain={[-3, 3]} tickStep={1}>
+  <FunctionCurve fn={(x) => Math.pow(x, 1)} label="$y=x$" />
+</FunctionGraph>
+
+### Quadratic Function
+
+<span className="text-fd-muted-foreground">二次函数</span>
+
+$$
+y=x^2
+$$
+
+<FunctionGraph xDomain={[-3, 3]} yDomain={[-1, 5]} tickStep={1}>
+  <FunctionCurve fn={(x) => Math.pow(x, 2)} label="$y=x^2$" />
+</FunctionGraph>
+
+### Cubic Function
+
+<span className="text-fd-muted-foreground">三次函数</span>
+
+$$
+y=x^3
+$$
+
+<FunctionGraph xDomain={[-3, 3]} yDomain={[-3, 3]} tickStep={1}>
+  <FunctionCurve fn={(x) => Math.pow(x, 3)} label="$y=x^3$" />
+</FunctionGraph>
+
+### Square Root Function
+
+<span className="text-fd-muted-foreground">平方根函数</span>
+
+$$
+y=\sqrt{x}
+$$
+
+<FunctionGraph xDomain={[-1, 5]} yDomain={[-1, 5]} tickStep={1}>
+  <FunctionCurve fn={(x) => Math.pow(x, 1 / 2)} label="$y=\sqrt{x}$" />
+</FunctionGraph>
+
+### Cube Root Function
+
+<span className="text-fd-muted-foreground">立方根函数</span>
+
+$$
+y=\sqrt[3]{x}
+$$
+
+<FunctionGraph xDomain={[-1, 5]} yDomain={[-1, 5]} tickStep={1}>
+  <FunctionCurve fn={(x) => Math.pow(x, 1 / 3)} label="$y=\sqrt[3]{x}$" />
+</FunctionGraph>
+
+### Reciprocal Function
+
+<span className="text-fd-muted-foreground">反比例函数</span>
+
+$$
+y=\frac{1}{x}
+$$
+
+$$
+x \neq 0 \\
+y \neq 0
+$$
+
+<FunctionGraph xDomain={[-3, 3]} yDomain={[-3, 3]} tickStep={1}>
+  <FunctionCurve fn={(x) => Math.pow(x, -1)} label="$y=\frac{1}{x}$" undefinedPoints={[0]} />
+</FunctionGraph>
+
+## Exponential Function
+
+<span className="text-fd-muted-foreground">指数函数</span>
+
+$$
+y=a^x
+$$
+
+<FunctionGraph xDomain={[-3, 3]} yDomain={[-1, 5]} tickStep={1}>
+  <FunctionCurve
+    fn={(x) => Math.pow(2, x)}
+    label="$y=a^x\;(a>1,\;e.g.\;a=2)$"
+    undefinedPoints={[0]}
+  />
+  <FunctionCurve
+    fn={(x) => Math.pow(1 / 2, x)}
+    label="$y=a^x\;(0<a<1,\;e.g.\;a=\frac{1}{2})$"
+    undefinedPoints={[0]}
+  />
+  <FunctionPoint x={0} y={1} />
+</FunctionGraph>
+
+## Logarithm Function
+
+<span className="text-fd-muted-foreground">对数函数</span>
+
+<FunctionGraph xDomain={[-1, 5]} yDomain={[-3, 3]} tickStep={1}>
+  <FunctionCurve
+    fn={(x) => Math.log(x) / Math.log(2)}
+    label="$y=log_ax\;(a>1,\;e.g.\;a=2)$"
+    undefinedPoints={[0]}
+  />
+  <FunctionCurve
+    fn={(x) => Math.log(x) / Math.log(1 / 2)}
+    label="$y=log_ax\;(0<a<1,\;e.g.\;a=\frac{1}{2})$"
+    undefinedPoints={[0]}
+  />
+  <FunctionPoint x={1} y={0} />
+</FunctionGraph>
+
+## Sine Function
+
+<span className="text-fd-muted-foreground">正弦函数</span>
+
+$$
+y=sin\,x
+$$
+
+<FunctionGraph
+  xDomain={[-4, 8]}
+  yDomain={[-2, 2]}
+  tickStep={1}
+  aspectRatio={3}
+  className="max-w-lg"
+>
+  <FunctionCurve id="sin" fn={(x) => Math.sin(x)} label="$y=sin\,x$" />
+  <FunctionPoint curveId="sin" x={Math.PI * -0.5} tooltip="$(-\frac{\pi}{2},-1)$" />
+  <FunctionPoint curveId="sin" x={Math.PI * 0} tooltip="$(0,0)$" />
+  <FunctionPoint curveId="sin" x={Math.PI * 0.5} tooltip="$(\frac{\pi}{2},1)$" />
+  <FunctionPoint curveId="sin" x={Math.PI * 1} tooltip="$(\pi,0)$" />
+  <FunctionPoint curveId="sin" x={Math.PI * 1.5} tooltip="$(\frac{3\pi}{2},-1)$" />
+  <FunctionPoint curveId="sin" x={Math.PI * 2} tooltip="$(2\pi,0)$" />
+</FunctionGraph>
+
+## Cosine Function
+
+<span className="text-fd-muted-foreground">余弦函数</span>
+
+$$
+y=cos\,x
+$$
+
+<FunctionGraph
+  xDomain={[-4, 8]}
+  yDomain={[-2, 2]}
+  tickStep={1}
+  aspectRatio={3}
+  className="max-w-lg"
+>
+  <FunctionCurve id="cos" fn={(x) => Math.cos(x)} label="$y=cos\,x$" />
+  <FunctionPoint curveId="cos" x={Math.PI * -0.5} tooltip="$(-\frac{\pi}{2},0)$" />
+  <FunctionPoint curveId="cos" x={Math.PI * 0} tooltip="$(0,1)$" />
+  <FunctionPoint curveId="cos" x={Math.PI * 0.5} tooltip="$(\frac{\pi}{2},0)$" />
+  <FunctionPoint curveId="cos" x={Math.PI * 1} tooltip="$(\pi,-1)$" />
+  <FunctionPoint curveId="cos" x={Math.PI * 1.5} tooltip="$(\frac{3\pi}{2},0)$" />
+  <FunctionPoint curveId="cos" x={Math.PI * 2} tooltip="$(2\pi,1)$" />
+</FunctionGraph>
