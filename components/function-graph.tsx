@@ -77,7 +77,7 @@ export interface FunctionPointProps {
   curveId?: string
   /** Explicit CSS color. Otherwise the referenced curve's color is inherited. */
   color?: string
-  /** Circle radius in graph units. Defaults to `4`. */
+  /** Circle radius in SVG display units. Defaults to `4`. */
   size?: number
   /** Draw a filled circle. Defaults to `true`. */
   filled?: boolean
@@ -112,10 +112,9 @@ interface Interval {
   openEnd: boolean
 }
 
-interface SamplePoint {
-  x: number
-  y: number | null
-}
+type DefinedSamplePoint = FunctionPointCoordinate
+
+type SamplePoint = DefinedSamplePoint | { x: number; y: null }
 
 interface ColorAssignment {
   color?: string
@@ -125,7 +124,6 @@ interface ColorAssignment {
 interface PreparedCurve extends ColorAssignment {
   key: string
   name: string
-  sourceId?: string
   fn: (x: number) => number
   label?: string
   domains?: readonly FunctionDomain[]
@@ -177,6 +175,16 @@ interface GraphLayout {
   yScale: NumericScale
 }
 
+interface GraphLayoutOptions {
+  xDomain: FunctionDomain
+  yDomain: FunctionDomain
+  aspectRatio: number
+  xTickStep: number | undefined
+  yTickStep: number | undefined
+  showTicks: boolean
+  showGrid: boolean
+}
+
 interface ScreenLine {
   x1: number
   y1: number
@@ -197,7 +205,7 @@ const AXIS_LABEL_GAP = 8
 const TICK_CHARACTER_WIDTH = 6.6
 const TICK_CHARACTER_HEIGHT = 14
 const TICK_BASELINE_OFFSET = 4
-const PLOT_EDGE_PADDING = 1
+const PLOT_EDGE_PADDING = 3
 
 const DEFAULT_TICK_COUNT = 8
 const MAX_TICK_COUNT = 2000
@@ -283,7 +291,7 @@ function validateIdentifier(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`${name} must be a non-empty string.`)
   }
-  return value
+  return value.trim()
 }
 
 function validateColor(value: unknown, name: string): string | undefined {
@@ -291,12 +299,15 @@ function validateColor(value: unknown, name: string): string | undefined {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`${name}.color must be a non-empty CSS color string.`)
   }
-  return value
+  return value.trim()
 }
 
 function validateTooltip(value: unknown, name: string): string | undefined {
   if (value === undefined) return undefined
-  return validateIdentifier(value, `${name}.tooltip`)
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${name}.tooltip must be a non-empty string.`)
+  }
+  return value
 }
 
 function validateCoordinate(value: unknown, name: string): FunctionPointCoordinate {
@@ -362,6 +373,10 @@ function resolveColor(
   if (explicitColor !== undefined) return { color: explicitColor }
   if (!curve) return {}
   return curve.color !== undefined ? { color: curve.color } : { colorClass: curve.colorClass }
+}
+
+function getColorStyle(color: string | undefined): { color: string } | undefined {
+  return color === undefined ? undefined : { color }
 }
 
 function getCurveById(
@@ -523,17 +538,16 @@ function collectGraphChildren(children: ReactNode): PreparedGraphChildren {
       }
 
       const color = validateColor(props.color, curveName)
-      const sourceId =
+      const curveId =
         props.id === undefined ? undefined : validateIdentifier(props.id, `${curveName}.id`)
 
-      if (sourceId !== undefined && curvesById.has(sourceId)) {
-        throw new Error(`FunctionCurve id "${sourceId}" is duplicated; every id must be unique.`)
+      if (curveId !== undefined && curvesById.has(curveId)) {
+        throw new Error(`FunctionCurve id "${curveId}" is duplicated; every id must be unique.`)
       }
 
       const curve: PreparedCurve = {
         key: `curve-${curves.length}`,
-        name: sourceId === undefined ? curveName : `FunctionCurve "${sourceId}"`,
-        sourceId,
+        name: curveId === undefined ? curveName : `FunctionCurve "${curveId}"`,
         fn: props.fn,
         label: props.label,
         color,
@@ -543,7 +557,7 @@ function collectGraphChildren(children: ReactNode): PreparedGraphChildren {
           color === undefined ? SERIES_COLORS[curves.length % SERIES_COLORS.length] : undefined,
       }
       curves.push(curve)
-      if (sourceId !== undefined) curvesById.set(sourceId, curve)
+      if (curveId !== undefined) curvesById.set(curveId, curve)
       return
     }
 
@@ -658,14 +672,234 @@ function intersectDomains(curve: PreparedCurve, xDomain: FunctionDomain): Interv
   return splitIntervals
 }
 
-/** Sample each interval independently so discontinuities never get joined. */
-function sampleCurve(curve: PreparedCurve, xDomain: FunctionDomain): SamplePoint[] {
+const OUT_LEFT = 1
+const OUT_RIGHT = 2
+const OUT_BOTTOM = 4
+const OUT_TOP = 8
+
+function getDomainOutcode(
+  point: FunctionPointCoordinate,
+  xDomain: FunctionDomain,
+  yDomain: FunctionDomain,
+): number {
+  let code = 0
+  if (point.x < xDomain[0]) code |= OUT_LEFT
+  if (point.x > xDomain[1]) code |= OUT_RIGHT
+  if (point.y < yDomain[0]) code |= OUT_BOTTOM
+  if (point.y > yDomain[1]) code |= OUT_TOP
+  return code
+}
+
+interface InterpolationWeights {
+  from: number
+  to: number
+}
+
+interface LineEquation {
+  a: number
+  b: number
+  c: number
+}
+
+function createLineEquation(
+  from: FunctionPointCoordinate,
+  to: FunctionPointCoordinate,
+): LineEquation {
+  // Each point is independently normalized in homogeneous coordinates. This
+  // avoids overflowing the cross product without changing the represented
+  // line, even when coordinates approach Number.MAX_VALUE.
+  const fromScale = Math.max(Math.abs(from.x), Math.abs(from.y), 1)
+  const toScale = Math.max(Math.abs(to.x), Math.abs(to.y), 1)
+  const fromX = from.x / fromScale
+  const fromY = from.y / fromScale
+  const fromW = 1 / fromScale
+  const toX = to.x / toScale
+  const toY = to.y / toScale
+  const toW = 1 / toScale
+
+  return {
+    a: fromY * toW - fromW * toY,
+    b: fromW * toX - fromX * toW,
+    c: fromX * toY - fromY * toX,
+  }
+}
+
+function clampWeight(value: number): number {
+  return Math.min(Math.max(value, 0), 1)
+}
+
+function getInterpolationWeights(from: number, to: number, target: number): InterpolationWeights {
+  if (from === to) return { from: 1, to: 0 }
+
+  const delta = to - from
+  if (Number.isFinite(delta)) {
+    const fromWeight = clampWeight((to - target) / delta)
+    const toWeight = clampWeight((target - from) / delta)
+    const total = fromWeight + toWeight
+    return total === 0 ? { from: 0.5, to: 0.5 } : { from: fromWeight / total, to: toWeight / total }
+  }
+
+  // Normalize before subtracting so opposite-signed values near the numeric
+  // limit do not overflow while calculating the boundary ratio.
+  const scale = Math.max(Math.abs(from), Math.abs(to), Math.abs(target), 1)
+  const normalizedFrom = from / scale
+  const normalizedTo = to / scale
+  const normalizedTarget = target / scale
+  const normalizedDelta = normalizedTo - normalizedFrom
+
+  if (normalizedDelta === 0) return { from: 0.5, to: 0.5 }
+
+  const fromWeight = clampWeight((normalizedTo - normalizedTarget) / normalizedDelta)
+  const toWeight = clampWeight((normalizedTarget - normalizedFrom) / normalizedDelta)
+  const total = fromWeight + toWeight
+  return total === 0 ? { from: 0.5, to: 0.5 } : { from: fromWeight / total, to: toWeight / total }
+}
+
+function interpolateFinite(from: number, to: number, weights: InterpolationWeights): number {
+  if (weights.from === 1) return from
+  if (weights.to === 1) return to
+
+  const value = from * weights.from + to * weights.to
+  if (Number.isFinite(value)) return value
+
+  // The weighted form above is stable for most large values. This fallback
+  // keeps the result finite even when multiplication rounds at the limit.
+  const scaledValue = ((from / 2) * weights.from + (to / 2) * weights.to) * 2
+  return Number.isFinite(scaledValue)
+    ? scaledValue
+    : Math.sign(scaledValue || from || to) * Number.MAX_VALUE
+}
+
+function interpolateDomainBoundary(
+  from: FunctionPointCoordinate,
+  to: FunctionPointCoordinate,
+  axis: 'x' | 'y',
+  boundary: number,
+  line: LineEquation,
+): FunctionPointCoordinate {
+  const denominator = axis === 'x' ? line.b : line.a
+  const numerator = axis === 'x' ? -(line.a * boundary + line.c) : -(line.b * boundary + line.c)
+  const solvedValue = numerator / denominator
+
+  if (Number.isFinite(solvedValue)) {
+    return axis === 'x' ? { x: boundary, y: solvedValue } : { x: solvedValue, y: boundary }
+  }
+
+  // A degenerate or underflowed line equation falls back to weighted endpoint
+  // interpolation. Both methods preserve finite output.
+  const fromValue = axis === 'x' ? from.x : from.y
+  const toValue = axis === 'x' ? to.x : to.y
+  const weights = getInterpolationWeights(fromValue, toValue, boundary)
+
+  if (axis === 'x') {
+    return { x: boundary, y: interpolateFinite(from.y, to.y, weights) }
+  }
+
+  return { x: interpolateFinite(from.x, to.x, weights), y: boundary }
+}
+
+/** Clip a linear segment to the finite graph rectangle. */
+function clipSegmentToDomains(
+  from: FunctionPointCoordinate,
+  to: FunctionPointCoordinate,
+  xDomain: FunctionDomain,
+  yDomain: FunctionDomain,
+): [FunctionPointCoordinate, FunctionPointCoordinate] | null {
+  let start = from
+  let end = to
+  let startCode = getDomainOutcode(start, xDomain, yDomain)
+  let endCode = getDomainOutcode(end, xDomain, yDomain)
+
+  if ((startCode | endCode) === 0) return [start, end]
+  if ((startCode & endCode) !== 0) return null
+
+  // Most sample segments are either wholly visible or trivially outside, so
+  // build the more expensive line equation only for a boundary crossing.
+  const line = createLineEquation(from, to)
+
+  // A segment can cross at most two rectangle edges. The extra iterations
+  // make the loop resilient to a point landing exactly on a corner.
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    if ((startCode | endCode) === 0) return [start, end]
+    if ((startCode & endCode) !== 0) return null
+
+    const code = startCode !== 0 ? startCode : endCode
+    let intersection: FunctionPointCoordinate
+
+    if (code & OUT_TOP) {
+      intersection = interpolateDomainBoundary(start, end, 'y', yDomain[1], line)
+    } else if (code & OUT_BOTTOM) {
+      intersection = interpolateDomainBoundary(start, end, 'y', yDomain[0], line)
+    } else if (code & OUT_RIGHT) {
+      intersection = interpolateDomainBoundary(start, end, 'x', xDomain[1], line)
+    } else {
+      intersection = interpolateDomainBoundary(start, end, 'x', xDomain[0], line)
+    }
+
+    if (startCode !== 0) {
+      start = intersection
+      startCode = getDomainOutcode(start, xDomain, yDomain)
+    } else {
+      end = intersection
+      endCode = getDomainOutcode(end, xDomain, yDomain)
+    }
+  }
+
+  return null
+}
+
+function sameDefinedSamplePoint(left: DefinedSamplePoint, right: DefinedSamplePoint): boolean {
+  return left.x === right.x && left.y === right.y
+}
+
+function appendSampleBreak(samples: SamplePoint[], x: number): void {
+  const previous = samples.at(-1)
+  if (previous && previous.y === null) return
+  samples.push({ x, y: null })
+}
+
+function appendClippedSegment(
+  samples: SamplePoint[],
+  segment: [DefinedSamplePoint, DefinedSamplePoint],
+): void {
+  const [start, end] = segment
+  const previous = samples.at(-1)
+
+  if (!previous || previous.y === null) {
+    samples.push(start)
+  } else if (!sameDefinedSamplePoint(previous, start)) {
+    // The previous segment ended outside the plot, so this visible segment
+    // starts a new subpath even when both segments came from adjacent samples.
+    appendSampleBreak(samples, start.x)
+    samples.push(start)
+  }
+
+  const last = samples.at(-1)
+  if (!last || last.y === null || !sameDefinedSamplePoint(last, end)) {
+    samples.push(end)
+  }
+}
+
+/**
+ * Sample each interval independently and retain only the portions visible in
+ * the plot rectangle. Boundary intersections preserve the original linear path
+ * while avoiding large offscreen coordinates in the generated SVG.
+ */
+function sampleCurve(
+  curve: PreparedCurve,
+  xDomain: FunctionDomain,
+  yDomain: FunctionDomain,
+): SamplePoint[] {
   const intervals = intersectDomains(curve, xDomain)
   const totalSpan = xDomain[1] - xDomain[0]
   const samples: SamplePoint[] = []
+  let previous: DefinedSamplePoint | undefined
 
   intervals.forEach((interval, intervalIndex) => {
-    if (intervalIndex > 0) samples.push({ x: interval.start, y: null })
+    if (intervalIndex > 0) {
+      appendSampleBreak(samples, interval.start)
+      previous = undefined
+    }
 
     const span = interval.end - interval.start
     const count = Math.max(2, Math.ceil((SAMPLE_COUNT * span) / totalSpan))
@@ -687,20 +921,37 @@ function sampleCurve(curve: PreparedCurve, xDomain: FunctionDomain): SamplePoint
         // prevent the rest of a curve from being displayed.
       }
 
-      samples.push({ x, y })
+      if (y === null) {
+        appendSampleBreak(samples, x)
+        previous = undefined
+        continue
+      }
+
+      const current: DefinedSamplePoint = { x, y }
+      if (previous !== undefined) {
+        const clippedSegment = clipSegmentToDomains(previous, current, xDomain, yDomain)
+        if (clippedSegment === null) {
+          appendSampleBreak(samples, x)
+        } else {
+          appendClippedSegment(samples, clippedSegment)
+        }
+      }
+      previous = current
     }
   })
 
+  if (samples.at(-1)?.y === null) samples.pop()
   return samples
 }
 
 function createCurvePath(
   curve: PreparedCurve,
   xDomain: FunctionDomain,
+  yDomain: FunctionDomain,
   xScale: GraphLayout['xScale'],
   yScale: GraphLayout['yScale'],
 ): string | null {
-  const sampledPoints = sampleCurve(curve, xDomain)
+  const sampledPoints = sampleCurve(curve, xDomain, yDomain)
   return (
     line<SamplePoint>()
       .defined((point) => point.y !== null)
@@ -825,9 +1076,7 @@ function AnnotationTooltip({
       height={TOOLTIP_HEIGHT}
       overflow="visible"
       pointerEvents="none"
-      className={cn(
-        'pointer-events-none overflow-visible opacity-0 transition-opacity delay-200 duration-150 select-none group-hover:opacity-100',
-      )}
+      className="pointer-events-none overflow-visible opacity-0 transition-opacity delay-200 duration-150 select-none group-hover:opacity-100"
     >
       <div
         className={cn(
@@ -847,21 +1096,23 @@ function accessibleLabel(label: string): string {
   return isLatexLabel(label) ? label.trim().slice(1, -1) : label
 }
 
-function createGraphLayout(
-  xDomain: FunctionDomain,
-  yDomain: FunctionDomain,
-  aspectRatio: number,
-  xTickStep: number | undefined,
-  yTickStep: number | undefined,
-  showTicks: boolean,
-): GraphLayout {
+function createGraphLayout({
+  xDomain,
+  yDomain,
+  aspectRatio,
+  xTickStep,
+  yTickStep,
+  showTicks,
+  showGrid,
+}: GraphLayoutOptions): GraphLayout {
   const plotHeight = PLOT_WIDTH / aspectRatio
   if (!isFiniteNumber(plotHeight)) {
     throw new Error('aspectRatio is too small to produce a finite plot height.')
   }
 
+  const needsTicks = showTicks || showGrid
   const yScaleForTicks = scaleLinear<number, number>().domain(yDomain).range([plotHeight, 0])
-  const yTicks = createTicks(yScaleForTicks, yDomain, yTickStep, 'yTickStep')
+  const yTicks = needsTicks ? createTicks(yScaleForTicks, yDomain, yTickStep, 'yTickStep') : []
   const formatYTick = yScaleForTicks.tickFormat(yTicks.length || DEFAULT_TICK_COUNT)
   const yTickMetrics = yTicks.map((tick) => ({
     position: yScaleForTicks(tick),
@@ -870,7 +1121,7 @@ function createGraphLayout(
   const yTickLabelWidth = Math.max(0, ...yTickMetrics.map(({ width }) => width))
 
   const xScaleForTicks = scaleLinear<number, number>().domain(xDomain).range([0, PLOT_WIDTH])
-  const xTicks = createTicks(xScaleForTicks, xDomain, xTickStep, 'xTickStep')
+  const xTicks = needsTicks ? createTicks(xScaleForTicks, xDomain, xTickStep, 'xTickStep') : []
   const formatXTick = xScaleForTicks.tickFormat(xTicks.length || DEFAULT_TICK_COUNT)
   const xTickMetrics = xTicks.map((tick) => ({
     position: xScaleForTicks(tick),
@@ -932,71 +1183,62 @@ function createGraphLayout(
   }
 }
 
-function getScreenLine(line: PreparedLine, layout: GraphLayout): ScreenLine {
+function getGraphLine(
+  line: PreparedLine,
+  xDomain: FunctionDomain,
+  yDomain: FunctionDomain,
+): [FunctionPointCoordinate, FunctionPointCoordinate] | null {
   if (line.kind === 'segment') {
-    return {
-      x1: layout.xScale(line.from.x),
-      y1: layout.yScale(line.from.y),
-      x2: layout.xScale(line.to.x),
-      y2: layout.yScale(line.to.y),
-    }
+    return clipSegmentToDomains(line.from, line.to, xDomain, yDomain)
   }
 
   if (line.kind === 'vertical') {
-    const x = layout.xScale(line.x)
-    return { x1: x, y1: layout.plotTop, x2: x, y2: layout.plotBottom }
+    if (line.x < xDomain[0] || line.x > xDomain[1]) return null
+    return [
+      { x: line.x, y: yDomain[0] },
+      { x: line.x, y: yDomain[1] },
+    ]
   }
 
-  const y = layout.yScale(line.y)
-  return { x1: layout.plotLeft, y1: y, x2: layout.plotRight, y2: y }
-}
-
-function getVisibleLine(screenLine: ScreenLine, layout: GraphLayout): ScreenLine | null {
-  // Liang-Barsky clipping gives the tooltip an anchor on the visible portion
-  // of an out-of-bounds segment rather than at its (possibly invisible) raw
-  // midpoint.
-  const dx = screenLine.x2 - screenLine.x1
-  const dy = screenLine.y2 - screenLine.y1
-  let start = 0
-  let end = 1
-
-  const constraints: Array<[number, number]> = [
-    [-dx, screenLine.x1 - layout.plotLeft],
-    [dx, layout.plotRight - screenLine.x1],
-    [-dy, screenLine.y1 - layout.plotTop],
-    [dy, layout.plotBottom - screenLine.y1],
+  if (line.y < yDomain[0] || line.y > yDomain[1]) return null
+  return [
+    { x: xDomain[0], y: line.y },
+    { x: xDomain[1], y: line.y },
   ]
+}
 
-  for (const [p, q] of constraints) {
-    if (p === 0) {
-      if (q < 0) return null
-      continue
-    }
-
-    const ratio = q / p
-    if (p < 0) {
-      if (ratio > end) return null
-      start = Math.max(start, ratio)
-    } else {
-      if (ratio < start) return null
-      end = Math.min(end, ratio)
-    }
-  }
-
+function toScreenLine(
+  graphLine: [FunctionPointCoordinate, FunctionPointCoordinate],
+  layout: GraphLayout,
+): ScreenLine {
+  const [from, to] = graphLine
   return {
-    x1: screenLine.x1 + dx * start,
-    y1: screenLine.y1 + dy * start,
-    x2: screenLine.x1 + dx * end,
-    y2: screenLine.y1 + dy * end,
+    x1: layout.xScale(from.x),
+    y1: layout.yScale(from.y),
+    x2: layout.xScale(to.x),
+    y2: layout.yScale(to.y),
   }
 }
 
-function getLineAnchor(screenLine: ScreenLine, layout: GraphLayout): { x: number; y: number } {
-  const visibleLine = getVisibleLine(screenLine, layout) ?? screenLine
-  return {
-    x: (visibleLine.x1 + visibleLine.x2) / 2,
-    y: (visibleLine.y1 + visibleLine.y2) / 2,
+function getScreenPoint(
+  point: PreparedPoint,
+  layout: GraphLayout,
+): { x: number; y: number } | null {
+  const x = layout.xScale(point.x)
+  const y = layout.yScale(point.y)
+  if (!isFiniteNumber(x) || !isFiniteNumber(y)) return null
+
+  const hitRadius = Math.max(point.size, ANNOTATION_HIT_WIDTH / 2) + ANNOTATION_HIT_WIDTH / 2
+  if (
+    x + hitRadius < layout.plotLeft ||
+    x - hitRadius > layout.plotRight ||
+    y + hitRadius < layout.plotTop ||
+    y - hitRadius > layout.plotBottom
+  ) {
+    return null
   }
+
+  return { x, y }
 }
 
 function ErrorFallback({ message, className }: { message: string; className?: string }) {
@@ -1058,8 +1300,17 @@ export default function FunctionGraph({
     const showTicks = validateBoolean(rawShowTicks, 'showTicks', true)
     const showLegend = validateBoolean(rawShowLegend, 'showLegend', true)
     const { curves, points, lines } = collectGraphChildren(children)
-    const layout = createGraphLayout(xDomain, yDomain, aspectRatio, xTickStep, yTickStep, showTicks)
+    const layout = createGraphLayout({
+      xDomain,
+      yDomain,
+      aspectRatio,
+      xTickStep,
+      yTickStep,
+      showTicks,
+      showGrid,
+    })
     const clipId = `${graphId}-clip`
+    const clipUrl = `url(#${clipId})`
 
     const labeledCurves = curves.filter((curve) => curve.label?.trim())
     const annotationCount = points.length + lines.length
@@ -1072,19 +1323,31 @@ export default function FunctionGraph({
       .filter(Boolean)
       .join(', ')
 
-    // Build paths once per render. This keeps function sampling out of the JSX
-    // tree and makes the fixed draw order explicit below.
+    // Build paths and visible annotation geometry once per render. This keeps
+    // sampling and clipping out of the JSX tree and makes draw order explicit.
     const curvePaths = curves.map((curve) => ({
       curve,
-      path: createCurvePath(curve, xDomain, layout.xScale, layout.yScale),
+      path: createCurvePath(curve, xDomain, yDomain, layout.xScale, layout.yScale),
     }))
-    const renderedLines = lines.map((annotation) => {
-      const screenLine = getScreenLine(annotation, layout)
-      return {
-        annotation,
-        screenLine,
-        anchor: getLineAnchor(screenLine, layout),
-      }
+    const renderedLines = lines.flatMap((annotation) => {
+      const graphLine = getGraphLine(annotation, xDomain, yDomain)
+      if (graphLine === null) return []
+
+      const screenLine = toScreenLine(graphLine, layout)
+      return [
+        {
+          annotation,
+          screenLine,
+          anchor: {
+            x: (screenLine.x1 + screenLine.x2) / 2,
+            y: (screenLine.y1 + screenLine.y2) / 2,
+          },
+        },
+      ]
+    })
+    const renderedPoints = points.flatMap((point) => {
+      const screenPoint = getScreenPoint(point, layout)
+      return screenPoint === null ? [] : [{ point, anchorX: screenPoint.x, anchorY: screenPoint.y }]
     })
 
     const xZero = xDomain[0] <= 0 && xDomain[1] >= 0 ? layout.yScale(0) : undefined
@@ -1105,7 +1368,7 @@ export default function FunctionGraph({
             >
               {labeledCurves.map((curve) => {
                 const rendered = renderLabel(curve.label!)
-                const colorStyle = curve.color ? { color: curve.color } : undefined
+                const colorStyle = getColorStyle(curve.color)
 
                 return (
                   <li key={curve.key} className="inline-flex min-w-0 items-center gap-2">
@@ -1232,34 +1495,32 @@ export default function FunctionGraph({
           <g className="text-fd-foreground">
             {/* Annotation lines sit above the grid/axes and below curves. */}
             {renderedLines.map(({ annotation, screenLine }) => {
-              const colorStyle = annotation.color ? { color: annotation.color } : undefined
+              const colorStyle = getColorStyle(annotation.color)
 
               return (
-                <g key={annotation.id}>
-                  <g clipPath={`url(#${clipId})`}>
-                    <line
-                      {...screenLine}
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeDasharray={annotation.dashed ? '6 4' : undefined}
-                      style={colorStyle}
-                      vectorEffect="non-scaling-stroke"
-                      className={annotation.colorClass}
-                      aria-label={annotation.tooltip}
-                      pointerEvents="none"
-                    />
-                  </g>
-                </g>
+                <line
+                  key={annotation.id}
+                  {...screenLine}
+                  clipPath={clipUrl}
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeDasharray={annotation.dashed ? '6 4' : undefined}
+                  style={colorStyle}
+                  vectorEffect="non-scaling-stroke"
+                  className={annotation.colorClass}
+                  aria-label={annotation.tooltip}
+                  pointerEvents="none"
+                />
               )
             })}
 
             {/* Curves are rendered after lines so annotations remain readable.
                 They do not need pointer events, so they cannot block a line's
                 wider transparent hit stroke. */}
-            <g clipPath={`url(#${clipId})`}>
+            <g clipPath={clipUrl}>
               {curvePaths.map(({ curve, path }) => {
                 if (!path) return null
-                const colorStyle = curve.color ? { color: curve.color } : undefined
+                const colorStyle = getColorStyle(curve.color)
                 return (
                   <path
                     key={curve.key}
@@ -1281,11 +1542,11 @@ export default function FunctionGraph({
             {/* Keep the line hit layer and tooltip above every curve. The
                 visual line remains in the required pre-curve draw order. */}
             {renderedLines.map(({ annotation, screenLine, anchor }) => {
-              const colorStyle = annotation.color ? { color: annotation.color } : undefined
+              const colorStyle = getColorStyle(annotation.color)
 
               return (
                 <g key={`${annotation.id}-interaction`} className="group">
-                  <g clipPath={`url(#${clipId})`}>
+                  <g clipPath={clipUrl}>
                     <line
                       {...screenLine}
                       stroke="currentColor"
@@ -1310,14 +1571,12 @@ export default function FunctionGraph({
             })}
 
             {/* Points are last so a point marker is not hidden by its curve. */}
-            {points.map((point) => {
-              const anchorX = layout.xScale(point.x)
-              const anchorY = layout.yScale(point.y)
-              const colorStyle = point.color ? { color: point.color } : undefined
+            {renderedPoints.map(({ point, anchorX, anchorY }) => {
+              const colorStyle = getColorStyle(point.color)
 
               return (
                 <g key={point.id} className="group">
-                  <g clipPath={`url(#${clipId})`}>
+                  <g clipPath={clipUrl}>
                     <circle
                       cx={anchorX}
                       cy={anchorY}
