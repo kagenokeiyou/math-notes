@@ -4,7 +4,10 @@ import { curveLinear, line } from 'd3-shape'
 import katex from 'katex'
 import { Children, isValidElement, useId, type ReactNode } from 'react'
 
-/** A finite, ascending interval used for an axis or a curve domain. */
+/**
+ * An ascending numeric interval. Graph axes must be finite; curve domains may
+ * use `-Infinity` and `Infinity` and are clipped to the graph's x-domain.
+ */
 export type FunctionDomain = readonly [number, number]
 
 /**
@@ -49,7 +52,10 @@ export interface FunctionCurveProps {
   label?: string
   /** Explicit CSS color. Otherwise a theme-aware series color is assigned. */
   color?: string
-  /** One or more non-overlapping x intervals in which the curve is drawn. */
+  /**
+   * Non-overlapping x intervals in which the curve is drawn. Infinite
+   * endpoints are allowed and are clipped to `FunctionGraph.xDomain`.
+   */
   domains?: readonly FunctionDomain[]
   /** x values at which the sampled path must be split. */
   undefinedPoints?: readonly number[]
@@ -75,7 +81,7 @@ export interface FunctionPointProps {
   size?: number
   /** Draw a filled circle. Defaults to `true`. */
   filled?: boolean
-  /** Hover tooltip content. Complete `$...$` values are rendered as KaTeX. */
+  /** Hover tooltip content. `$...$` fragments are rendered as KaTeX. */
   tooltip?: string
 }
 
@@ -95,7 +101,7 @@ export interface FunctionLineProps {
   color?: string
   /** Draw a dashed line instead of a solid line. Defaults to `false`. */
   dashed?: boolean
-  /** Hover tooltip content. Complete `$...$` values are rendered as KaTeX. */
+  /** Hover tooltip content. `$...$` fragments are rendered as KaTeX. */
   tooltip?: string
 }
 
@@ -118,6 +124,7 @@ interface ColorAssignment {
 
 interface PreparedCurve extends ColorAssignment {
   key: string
+  name: string
   sourceId?: string
   fn: (x: number) => number
   label?: string
@@ -188,7 +195,7 @@ const PLOT_WIDTH = 360
 // the outer viewBox tight while reserving enough room for negative labels.
 const AXIS_LABEL_GAP = 8
 const TICK_CHARACTER_WIDTH = 6.6
-const TICK_CHARACTER_HEIGHT = 16
+const TICK_CHARACTER_HEIGHT = 14
 const TICK_BASELINE_OFFSET = 4
 const PLOT_EDGE_PADDING = 1
 
@@ -215,7 +222,7 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function validateDomain(value: unknown, name: string): FunctionDomain {
+function validateFiniteDomain(value: unknown, name: string): FunctionDomain {
   if (
     !Array.isArray(value) ||
     value.length !== 2 ||
@@ -224,7 +231,25 @@ function validateDomain(value: unknown, name: string): FunctionDomain {
     value[0] >= value[1] ||
     !isFiniteNumber(value[1] - value[0])
   ) {
-    throw new Error(`${name} must be a finite ascending pair`)
+    throw new Error(`${name} must be [min, max] with finite numbers and min < max.`)
+  }
+
+  return [value[0], value[1]]
+}
+
+function validateCurveDomain(value: unknown, name: string): FunctionDomain {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    typeof value[0] !== 'number' ||
+    Number.isNaN(value[0]) ||
+    typeof value[1] !== 'number' ||
+    Number.isNaN(value[1]) ||
+    value[0] >= value[1]
+  ) {
+    throw new Error(
+      `${name} must be [min, max] with min < max; -Infinity is allowed for min and Infinity for max.`,
+    )
   }
 
   return [value[0], value[1]]
@@ -234,7 +259,7 @@ function validateTickStep(value: unknown, name: string): number | undefined {
   if (value === undefined) return undefined
 
   if (!isFiniteNumber(value) || value <= 0) {
-    throw new Error(`${name} must be a finite number greater than zero`)
+    throw new Error(`${name} must be a finite number greater than 0.`)
   }
 
   return value
@@ -242,7 +267,7 @@ function validateTickStep(value: unknown, name: string): number | undefined {
 
 function validateAspectRatio(value: unknown): number {
   if (!isFiniteNumber(value) || value <= 0) {
-    throw new Error('aspectRatio must be a finite number greater than zero')
+    throw new Error('aspectRatio must be a finite number greater than 0.')
   }
 
   return value
@@ -250,13 +275,13 @@ function validateAspectRatio(value: unknown): number {
 
 function validateBoolean(value: unknown, name: string, fallback: boolean): boolean {
   if (value === undefined) return fallback
-  if (typeof value !== 'boolean') throw new Error(`${name} must be a boolean`)
+  if (typeof value !== 'boolean') throw new Error(`${name} must be true or false.`)
   return value
 }
 
 function validateIdentifier(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`${name} must be a non-empty string`)
+    throw new Error(`${name} must be a non-empty string.`)
   }
   return value
 }
@@ -264,24 +289,24 @@ function validateIdentifier(value: unknown, name: string): string {
 function validateColor(value: unknown, name: string): string | undefined {
   if (value === undefined) return undefined
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`${name} color must be a non-empty CSS color string`)
+    throw new Error(`${name}.color must be a non-empty CSS color string.`)
   }
   return value
 }
 
 function validateTooltip(value: unknown, name: string): string | undefined {
   if (value === undefined) return undefined
-  return validateIdentifier(value, `${name} tooltip`)
+  return validateIdentifier(value, `${name}.tooltip`)
 }
 
 function validateCoordinate(value: unknown, name: string): FunctionPointCoordinate {
   if (typeof value !== 'object' || value === null) {
-    throw new Error(`${name} must contain finite x and y coordinates`)
+    throw new Error(`${name} must be an object with finite numeric x and y values.`)
   }
 
   const coordinate = value as { x?: unknown; y?: unknown }
   if (!isFiniteNumber(coordinate.x) || !isFiniteNumber(coordinate.y)) {
-    throw new Error(`${name} must contain finite x and y coordinates`)
+    throw new Error(`${name} must be an object with finite numeric x and y values.`)
   }
 
   return { x: coordinate.x, y: coordinate.y }
@@ -291,12 +316,15 @@ function createTicks(
   scale: NumericScale,
   domain: FunctionDomain,
   step: number | undefined,
+  stepName: 'xTickStep' | 'yTickStep',
 ): number[] {
   if (step === undefined) return scale.ticks(DEFAULT_TICK_COUNT)
 
   const span = domain[1] - domain[0]
   if (span / step > MAX_TICK_COUNT) {
-    throw new Error(`tick step produces too many ticks (maximum is ${MAX_TICK_COUNT})`)
+    throw new Error(
+      `${stepName} creates more than ${MAX_TICK_COUNT} ticks for this domain; increase its value.`,
+    )
   }
 
   // A tiny tolerance avoids dropping a boundary tick when division produces
@@ -307,7 +335,9 @@ function createTicks(
   const count = lastIndex - firstIndex + 1
 
   if (count > MAX_TICK_COUNT) {
-    throw new Error(`tick step produces too many ticks (maximum is ${MAX_TICK_COUNT})`)
+    throw new Error(
+      `${stepName} creates more than ${MAX_TICK_COUNT} ticks for this domain; increase its value.`,
+    )
   }
 
   return Array.from({ length: Math.max(0, count) }, (_, index) => {
@@ -339,9 +369,11 @@ function getCurveById(
   rawCurveId: unknown,
   name: string,
 ): PreparedCurve {
-  const curveId = validateIdentifier(rawCurveId, `${name} curveId`)
+  const curveId = validateIdentifier(rawCurveId, `${name}.curveId`)
   const curve = curvesById.get(curveId)
-  if (!curve) throw new Error(`${name} references unknown curve id "${curveId}"`)
+  if (!curve) {
+    throw new Error(`${name}.curveId "${curveId}" does not match any FunctionCurve id.`)
+  }
   return curve
 }
 
@@ -350,24 +382,24 @@ function preparePoint(
   index: number,
   curvesById: Map<string, PreparedCurve>,
 ): PreparedPoint {
-  const name = `point ${index + 1}`
-  if (!isFiniteNumber(props.x)) throw new Error(`${name} x must be finite`)
+  const name = `FunctionPoint ${index + 1}`
+  if (!isFiniteNumber(props.x)) throw new Error(`${name}.x must be a finite number.`)
 
   const hasY = props.y !== undefined
   const hasCurveId = props.curveId !== undefined
   if (hasY === hasCurveId) {
-    throw new Error(`${name} must provide exactly one of y or curveId`)
+    throw new Error(`${name} must provide either y or curveId, but not both.`)
   }
 
   const explicitColor = validateColor(props.color, name)
   const explicitTooltip = validateTooltip(props.tooltip, name)
   const size = props.size ?? 4
   if (!isFiniteNumber(size) || size <= 0) {
-    throw new Error(`${name} size must be a finite number greater than zero`)
+    throw new Error(`${name}.size must be a finite number greater than 0.`)
   }
 
   const filled = props.filled ?? true
-  if (typeof filled !== 'boolean') throw new Error(`${name} filled must be a boolean`)
+  if (typeof filled !== 'boolean') throw new Error(`${name}.filled must be true or false.`)
 
   const curve = hasCurveId ? getCurveById(curvesById, props.curveId, name) : undefined
   let y: number
@@ -376,12 +408,14 @@ function preparePoint(
     try {
       y = curve.fn(props.x)
     } catch {
-      throw new Error(`${name} curve evaluation failed`)
+      throw new Error(`${name} could not evaluate ${curve.name} at x=${props.x}.`)
     }
-    if (!isFiniteNumber(y)) throw new Error(`${name} curve evaluation must be finite`)
+    if (!isFiniteNumber(y)) {
+      throw new Error(`${name} requires ${curve.name}.fn(${props.x}) to return a finite number.`)
+    }
   } else {
     y = props.y as number
-    if (!isFiniteNumber(y)) throw new Error(`${name} y must be finite`)
+    if (!isFiniteNumber(y)) throw new Error(`${name}.y must be a finite number.`)
   }
 
   return {
@@ -389,8 +423,7 @@ function preparePoint(
     x: props.x,
     y,
     tooltip:
-      explicitTooltip ??
-      `Point: (${formatAnnotationNumber(props.x)}, ${formatAnnotationNumber(y)})`,
+      explicitTooltip ?? `$(${formatAnnotationNumber(props.x)},${formatAnnotationNumber(y)})$`,
     ...resolveColor(curve, explicitColor),
     size,
     filled,
@@ -402,7 +435,7 @@ function prepareLine(
   index: number,
   curvesById: Map<string, PreparedCurve>,
 ): PreparedLine {
-  const name = `line ${index + 1}`
+  const name = `FunctionLine ${index + 1}`
   const hasFrom = props.from !== undefined
   const hasTo = props.to !== undefined
   const hasSegment = hasFrom || hasTo
@@ -411,20 +444,20 @@ function prepareLine(
   const geometryCount = [hasSegment, hasVertical, hasHorizontal].filter(Boolean).length
 
   if (geometryCount !== 1 || (hasSegment && (!hasFrom || !hasTo))) {
-    throw new Error(`${name} must provide exactly one line geometry`)
+    throw new Error(`${name} must provide exactly one geometry: x, y, or both from and to.`)
   }
 
   const explicitColor = validateColor(props.color, name)
   const explicitTooltip = validateTooltip(props.tooltip, name)
   const dashed = props.dashed ?? false
-  if (typeof dashed !== 'boolean') throw new Error(`${name} dashed must be a boolean`)
+  if (typeof dashed !== 'boolean') throw new Error(`${name}.dashed must be true or false.`)
 
   const curve =
     props.curveId === undefined ? undefined : getCurveById(curvesById, props.curveId, name)
 
   if (hasSegment) {
-    const from = validateCoordinate(props.from, `${name} from`)
-    const to = validateCoordinate(props.to, `${name} to`)
+    const from = validateCoordinate(props.from, `${name}.from`)
+    const to = validateCoordinate(props.to, `${name}.to`)
     return {
       id: `line-${index}`,
       kind: 'segment',
@@ -432,30 +465,30 @@ function prepareLine(
       to,
       tooltip:
         explicitTooltip ??
-        `Line segment: (${formatAnnotationNumber(from.x)}, ${formatAnnotationNumber(from.y)}) -> (${formatAnnotationNumber(to.x)}, ${formatAnnotationNumber(to.y)})`,
+        `$(${formatAnnotationNumber(from.x)},${formatAnnotationNumber(from.y)}) \\to (${formatAnnotationNumber(to.x)},${formatAnnotationNumber(to.y)})$`,
       ...resolveColor(curve, explicitColor),
       dashed,
     }
   }
 
   if (hasVertical) {
-    if (!isFiniteNumber(props.x)) throw new Error(`${name} x must be finite`)
+    if (!isFiniteNumber(props.x)) throw new Error(`${name}.x must be a finite number.`)
     return {
       id: `line-${index}`,
       kind: 'vertical',
       x: props.x,
-      tooltip: explicitTooltip ?? `Vertical line: x = ${formatAnnotationNumber(props.x)}`,
+      tooltip: explicitTooltip ?? `$x=${formatAnnotationNumber(props.x)}$`,
       ...resolveColor(curve, explicitColor),
       dashed,
     }
   }
 
-  if (!isFiniteNumber(props.y)) throw new Error(`${name} y must be finite`)
+  if (!isFiniteNumber(props.y)) throw new Error(`${name}.y must be a finite number.`)
   return {
     id: `line-${index}`,
     kind: 'horizontal',
     y: props.y,
-    tooltip: explicitTooltip ?? `Horizontal line: y = ${formatAnnotationNumber(props.y)}`,
+    tooltip: explicitTooltip ?? `$y=${formatAnnotationNumber(props.y)}$`,
     ...resolveColor(curve, explicitColor),
     dashed,
   }
@@ -463,7 +496,9 @@ function prepareLine(
 
 function collectGraphChildren(children: ReactNode): PreparedGraphChildren {
   const elements = Children.toArray(children)
-  if (elements.length === 0) throw new Error('at least one FunctionCurve is required')
+  if (elements.length === 0) {
+    throw new Error('FunctionGraph requires at least one FunctionCurve child.')
+  }
 
   const curves: PreparedCurve[] = []
   const curvesById = new Map<string, PreparedCurve>()
@@ -472,28 +507,32 @@ function collectGraphChildren(children: ReactNode): PreparedGraphChildren {
 
   elements.forEach((child, index) => {
     if (!isValidElement(child)) {
-      throw new Error(`child ${index + 1} must be a FunctionCurve, FunctionPoint, or FunctionLine`)
+      throw new Error(
+        `FunctionGraph child ${index + 1} must be FunctionCurve, FunctionPoint, or FunctionLine.`,
+      )
     }
 
     if (child.type === FunctionCurve) {
       const props = child.props as FunctionCurveProps
+      const curveName = `FunctionCurve ${curves.length + 1}`
       if (typeof props.fn !== 'function') {
-        throw new Error(`curve ${index + 1} must provide an fn callback`)
+        throw new Error(`${curveName}.fn must be a function.`)
       }
       if (props.label !== undefined && typeof props.label !== 'string') {
-        throw new Error(`curve ${index + 1} label must be a string`)
+        throw new Error(`${curveName}.label must be a string.`)
       }
 
-      const color = validateColor(props.color, `curve ${index + 1}`)
+      const color = validateColor(props.color, curveName)
       const sourceId =
-        props.id === undefined ? undefined : validateIdentifier(props.id, `curve ${index + 1} id`)
+        props.id === undefined ? undefined : validateIdentifier(props.id, `${curveName}.id`)
 
       if (sourceId !== undefined && curvesById.has(sourceId)) {
-        throw new Error(`curve id "${sourceId}" must be unique`)
+        throw new Error(`FunctionCurve id "${sourceId}" is duplicated; every id must be unique.`)
       }
 
       const curve: PreparedCurve = {
         key: `curve-${curves.length}`,
+        name: sourceId === undefined ? curveName : `FunctionCurve "${sourceId}"`,
         sourceId,
         fn: props.fn,
         label: props.label,
@@ -518,10 +557,14 @@ function collectGraphChildren(children: ReactNode): PreparedGraphChildren {
       return
     }
 
-    throw new Error(`child ${index + 1} must be a FunctionCurve, FunctionPoint, or FunctionLine`)
+    throw new Error(
+      `FunctionGraph child ${index + 1} must be FunctionCurve, FunctionPoint, or FunctionLine.`,
+    )
   })
 
-  if (curves.length === 0) throw new Error('at least one FunctionCurve is required')
+  if (curves.length === 0) {
+    throw new Error('FunctionGraph requires at least one FunctionCurve child.')
+  }
 
   return {
     curves,
@@ -532,19 +575,21 @@ function collectGraphChildren(children: ReactNode): PreparedGraphChildren {
 
 function intersectDomains(curve: PreparedCurve, xDomain: FunctionDomain): Interval[] {
   if (curve.domains !== undefined && !Array.isArray(curve.domains)) {
-    throw new Error('curve domains must be an array of intervals')
+    throw new Error(`${curve.name}.domains must be an array of [min, max] intervals.`)
   }
 
   const requestedDomains = curve.domains?.map((domain, index) =>
-    validateDomain(domain, `curve domain ${index + 1}`),
+    validateCurveDomain(domain, `${curve.name}.domains[${index}]`),
   ) ?? [xDomain]
 
-  if (requestedDomains.length === 0) throw new Error('curve domains cannot be empty')
+  if (requestedDomains.length === 0) {
+    throw new Error(`${curve.name}.domains must contain at least one interval.`)
+  }
 
   const sortedDomains = [...requestedDomains].sort((a, b) => a[0] - b[0])
   for (let index = 1; index < sortedDomains.length; index += 1) {
     if (sortedDomains[index][0] < sortedDomains[index - 1][1]) {
-      throw new Error('curve domains cannot overlap')
+      throw new Error(`${curve.name}.domains must not contain overlapping intervals.`)
     }
   }
 
@@ -573,12 +618,14 @@ function intersectDomains(curve: PreparedCurve, xDomain: FunctionDomain): Interv
   }
 
   if (curve.undefinedPoints !== undefined && !Array.isArray(curve.undefinedPoints)) {
-    throw new Error('curve undefinedPoints must be an array')
+    throw new Error(`${curve.name}.undefinedPoints must be an array of finite numbers.`)
   }
 
   const undefinedPoints = [...(curve.undefinedPoints ?? [])]
     .map((point, index) => {
-      if (!isFiniteNumber(point)) throw new Error(`undefined point ${index + 1} must be finite`)
+      if (!isFiniteNumber(point)) {
+        throw new Error(`${curve.name}.undefinedPoints[${index}] must be a finite number.`)
+      }
       return point
     })
     .sort((a, b) => a - b)
@@ -703,12 +750,38 @@ function renderLabel(label: string): {
 }
 
 function renderRichText(content: string): ReactNode {
-  const rendered = renderLabel(content)
-  if (rendered.error) return <code className="break-all">{rendered.text}</code>
-  if (rendered.latex) {
-    return <span dangerouslySetInnerHTML={{ __html: rendered.html! }} />
+  const fragments: { offset: number; value: string }[] = []
+  const pattern = /\$[^$\r\n]+\$/g
+  let plainTextStart = 0
+
+  for (const match of content.matchAll(pattern)) {
+    const matchStart = match.index
+    if (matchStart > plainTextStart) {
+      fragments.push({ offset: plainTextStart, value: content.slice(plainTextStart, matchStart) })
+    }
+    fragments.push({ offset: matchStart, value: match[0] })
+    plainTextStart = matchStart + match[0].length
   }
-  return <span>{rendered.text}</span>
+
+  if (plainTextStart < content.length) {
+    fragments.push({ offset: plainTextStart, value: content.slice(plainTextStart) })
+  }
+
+  return fragments.map(({ offset, value }) => {
+    const rendered = renderLabel(value)
+
+    if (rendered.error) {
+      return (
+        <code className="break-all" key={offset}>
+          {rendered.text}
+        </code>
+      )
+    }
+    if (rendered.latex) {
+      return <span dangerouslySetInnerHTML={{ __html: rendered.html! }} key={offset} />
+    }
+    return <span key={offset}>{rendered.text}</span>
+  })
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -782,45 +855,64 @@ function createGraphLayout(
   yTickStep: number | undefined,
   showTicks: boolean,
 ): GraphLayout {
-  const yScaleForTicks = scaleLinear<number, number>().domain(yDomain)
-  const yTicks = createTicks(yScaleForTicks, yDomain, yTickStep)
-  const formatYTick = yScaleForTicks.tickFormat(yTicks.length || DEFAULT_TICK_COUNT)
-  const yTickLabelWidth = Math.max(
-    0,
-    ...yTicks.map((tick) => estimateTickLabelWidth(formatYTick(tick))),
-  )
-
-  const xScaleForTicks = scaleLinear<number, number>().domain(xDomain)
-  const xTicks = createTicks(xScaleForTicks, xDomain, xTickStep)
-  const formatXTick = xScaleForTicks.tickFormat(xTicks.length || DEFAULT_TICK_COUNT)
-  const firstXTickLabelWidth = xTicks.length ? estimateTickLabelWidth(formatXTick(xTicks[0])) : 0
-  const lastXTickLabelWidth = xTicks.length
-    ? estimateTickLabelWidth(formatXTick(xTicks[xTicks.length - 1]))
-    : 0
-
-  // Visible tick labels expand the surrounding viewBox without changing the
-  // plot ratio. Without labels, retain only enough padding for boundary strokes.
-  const plotLeft = showTicks
-    ? Math.max(
-        AXIS_LABEL_GAP,
-        yTickLabelWidth + AXIS_LABEL_GAP,
-        firstXTickLabelWidth / 2 + AXIS_LABEL_GAP,
-      )
-    : PLOT_EDGE_PADDING
-  const plotRight = plotLeft + PLOT_WIDTH
-  const plotTop = showTicks ? Math.ceil(TICK_CHARACTER_HEIGHT / 2) : PLOT_EDGE_PADDING
   const plotHeight = PLOT_WIDTH / aspectRatio
   if (!isFiniteNumber(plotHeight)) {
-    throw new Error('aspectRatio produces an invalid plot height')
+    throw new Error('aspectRatio is too small to produce a finite plot height.')
   }
+
+  const yScaleForTicks = scaleLinear<number, number>().domain(yDomain).range([plotHeight, 0])
+  const yTicks = createTicks(yScaleForTicks, yDomain, yTickStep, 'yTickStep')
+  const formatYTick = yScaleForTicks.tickFormat(yTicks.length || DEFAULT_TICK_COUNT)
+  const yTickMetrics = yTicks.map((tick) => ({
+    position: yScaleForTicks(tick),
+    width: estimateTickLabelWidth(formatYTick(tick)),
+  }))
+  const yTickLabelWidth = Math.max(0, ...yTickMetrics.map(({ width }) => width))
+
+  const xScaleForTicks = scaleLinear<number, number>().domain(xDomain).range([0, PLOT_WIDTH])
+  const xTicks = createTicks(xScaleForTicks, xDomain, xTickStep, 'xTickStep')
+  const formatXTick = xScaleForTicks.tickFormat(xTicks.length || DEFAULT_TICK_COUNT)
+  const xTickMetrics = xTicks.map((tick) => ({
+    position: xScaleForTicks(tick),
+    width: estimateTickLabelWidth(formatXTick(tick)),
+  }))
+
+  const leftXTickOverflow = Math.max(
+    0,
+    ...xTickMetrics.map(({ position, width }) => width / 2 - position),
+  )
+  const rightXTickOverflow = Math.max(
+    0,
+    ...xTickMetrics.map(({ position, width }) => width / 2 - (PLOT_WIDTH - position)),
+  )
+  const halfTickLabelHeight = TICK_CHARACTER_HEIGHT / 2
+  const topYTickOverflow = Math.max(
+    0,
+    ...yTickMetrics.map(({ position }) => halfTickLabelHeight - position),
+  )
+  const bottomYTickOverflow = Math.max(
+    0,
+    ...yTickMetrics.map(({ position }) => halfTickLabelHeight - (plotHeight - position)),
+  )
+
+  // Visible tick labels expand the surrounding viewBox without changing the
+  // plot ratio. Only labels that actually cross a plot edge contribute to that
+  // edge's margin, followed by the shared minimum outer padding.
+  const plotLeft = showTicks
+    ? PLOT_EDGE_PADDING +
+      Math.max(yTicks.length > 0 ? yTickLabelWidth + AXIS_LABEL_GAP : 0, leftXTickOverflow)
+    : PLOT_EDGE_PADDING
+  const plotRight = plotLeft + PLOT_WIDTH
+  const plotTop = showTicks ? PLOT_EDGE_PADDING + topYTickOverflow : PLOT_EDGE_PADDING
   const plotBottom = plotTop + plotHeight
-  const rightMargin = showTicks
-    ? Math.max(AXIS_LABEL_GAP, lastXTickLabelWidth / 2 + AXIS_LABEL_GAP)
+  const rightMargin = showTicks ? PLOT_EDGE_PADDING + rightXTickOverflow : PLOT_EDGE_PADDING
+  const bottomMargin = showTicks
+    ? PLOT_EDGE_PADDING +
+      Math.max(xTicks.length > 0 ? AXIS_LABEL_GAP + TICK_CHARACTER_HEIGHT : 0, bottomYTickOverflow)
     : PLOT_EDGE_PADDING
 
   const viewWidth = plotRight + rightMargin
-  const viewHeight =
-    plotBottom + (showTicks ? AXIS_LABEL_GAP + TICK_CHARACTER_HEIGHT : PLOT_EDGE_PADDING)
+  const viewHeight = plotBottom + bottomMargin
   const xScale = scaleLinear<number, number>().domain(xDomain).range([plotLeft, plotRight])
   const yScale = scaleLinear<number, number>().domain(yDomain).range([plotBottom, plotTop])
 
@@ -909,12 +1001,15 @@ function getLineAnchor(screenLine: ScreenLine, layout: GraphLayout): { x: number
 
 function ErrorFallback({ message, className }: { message: string; className?: string }) {
   return (
-    <figure className={cn('not-prose mx-auto my-6 w-full min-w-0', className)}>
+    <figure className={cn('not-prose mx-auto my-6 w-full max-w-sm min-w-0', className)}>
       <div
         role="alert"
-        className="border-fd-border bg-fd-muted/30 text-fd-muted-foreground flex aspect-square items-center justify-center border p-6 text-center text-sm"
+        className="border-fd-error/50 bg-fd-error/10 text-fd-error flex aspect-square items-center justify-center border p-6 text-center"
       >
-        {message}
+        <div className="max-w-xs">
+          <p className="m-0 text-sm font-medium">Unable to render FunctionGraph</p>
+          <p className="m-0 mt-2 text-sm leading-relaxed text-balance">{message}</p>
+        </div>
       </div>
     </figure>
   )
@@ -953,8 +1048,8 @@ export default function FunctionGraph({
   const graphId = `function-graph-${rawId.replace(/[^a-zA-Z0-9_-]/g, '')}`
 
   try {
-    const xDomain = validateDomain(rawXDomain, 'xDomain')
-    const yDomain = validateDomain(rawYDomain, 'yDomain')
+    const xDomain = validateFiniteDomain(rawXDomain, 'xDomain')
+    const yDomain = validateFiniteDomain(rawYDomain, 'yDomain')
     const aspectRatio = validateAspectRatio(rawAspectRatio)
     const tickStep = validateTickStep(rawTickStep, 'tickStep')
     const xTickStep = validateTickStep(rawXTickStep, 'xTickStep') ?? tickStep
@@ -1268,7 +1363,7 @@ export default function FunctionGraph({
     return (
       <ErrorFallback
         className={className}
-        message={error instanceof Error ? error.message : 'Unable to render function graph'}
+        message={error instanceof Error ? error.message : 'An unexpected error occurred.'}
       />
     )
   }
