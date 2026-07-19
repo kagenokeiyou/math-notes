@@ -81,7 +81,7 @@ export interface FunctionPointProps {
   size?: number
   /** Draw a filled circle. Defaults to `true`. */
   filled?: boolean
-  /** Hover tooltip content. `$...$` fragments are rendered as KaTeX. */
+  /** Tooltip content shown on hover, focus, or touch. `$...$` uses KaTeX. */
   tooltip?: string
 }
 
@@ -101,7 +101,7 @@ export interface FunctionLineProps {
   color?: string
   /** Draw a dashed line instead of a solid line. Defaults to `false`. */
   dashed?: boolean
-  /** Hover tooltip content. `$...$` fragments are rendered as KaTeX. */
+  /** Tooltip content shown on hover, focus, or touch. `$...$` uses KaTeX. */
   tooltip?: string
 }
 
@@ -216,6 +216,7 @@ const TOOLTIP_WIDTH = 200
 const TOOLTIP_HEIGHT = 64
 const TOOLTIP_OFFSET = 8
 const ANNOTATION_HIT_WIDTH = 12
+const TOUCH_ANNOTATION_HIT_WIDTH = 32
 
 const SERIES_COLORS = [
   'text-blue-600 dark:text-blue-400',
@@ -1054,6 +1055,7 @@ function getTooltipPlacement(
   return { x, y, isBelow }
 }
 
+/** CSS-only tooltip triggered by hover, keyboard focus, or touch focus. */
 function AnnotationTooltip({
   anchorX,
   anchorY,
@@ -1076,7 +1078,7 @@ function AnnotationTooltip({
       height={TOOLTIP_HEIGHT}
       overflow="visible"
       pointerEvents="none"
-      className="pointer-events-none overflow-visible opacity-0 transition-opacity delay-200 duration-150 select-none group-hover:opacity-100"
+      className="pointer-events-none overflow-visible opacity-0 transition-opacity delay-200 duration-150 select-none group-focus-within:opacity-100 group-hover:opacity-100 group-active:opacity-100"
     >
       <div
         className={cn(
@@ -1228,7 +1230,8 @@ function getScreenPoint(
   const y = layout.yScale(point.y)
   if (!isFiniteNumber(x) || !isFiniteNumber(y)) return null
 
-  const hitRadius = Math.max(point.size, ANNOTATION_HIT_WIDTH / 2) + ANNOTATION_HIT_WIDTH / 2
+  const hitRadius =
+    Math.max(point.size, TOUCH_ANNOTATION_HIT_WIDTH / 2) + TOUCH_ANNOTATION_HIT_WIDTH / 2
   if (
     x + hitRadius < layout.plotLeft ||
     x - hitRadius > layout.plotRight ||
@@ -1392,6 +1395,7 @@ export default function FunctionGraph({
         ) : null}
 
         <svg
+          id={graphId}
           role="img"
           aria-label={accessibleTitle}
           className="block h-auto w-full max-w-full select-none"
@@ -1408,6 +1412,14 @@ export default function FunctionGraph({
               />
             </clipPath>
           </defs>
+          <style>{`
+            @media (any-pointer: coarse) {
+              #${graphId} .function-graph-hit-line,
+              #${graphId} .function-graph-hit-point {
+                stroke-width: ${TOUCH_ANNOTATION_HIT_WIDTH};
+              }
+            }
+          `}</style>
 
           {/* Structural grid and axes are drawn before annotations. */}
           {showGrid
@@ -1508,7 +1520,7 @@ export default function FunctionGraph({
                   style={colorStyle}
                   vectorEffect="non-scaling-stroke"
                   className={annotation.colorClass}
-                  aria-label={annotation.tooltip}
+                  aria-hidden="true"
                   pointerEvents="none"
                 />
               )
@@ -1555,8 +1567,14 @@ export default function FunctionGraph({
                       strokeLinecap="round"
                       vectorEffect="non-scaling-stroke"
                       style={colorStyle}
-                      className={annotation.colorClass}
-                      aria-hidden="true"
+                      className={cn(
+                        'function-graph-hit-line touch-manipulation',
+                        annotation.colorClass,
+                      )}
+                      role="img"
+                      aria-label={annotation.tooltip}
+                      tabIndex={0}
+                      focusable="true"
                       pointerEvents="stroke"
                     />
                   </g>
@@ -1586,9 +1604,15 @@ export default function FunctionGraph({
                       strokeOpacity="0.001"
                       strokeWidth={ANNOTATION_HIT_WIDTH}
                       vectorEffect="non-scaling-stroke"
-                      className={point.colorClass}
+                      className={cn(
+                        'function-graph-hit-point touch-manipulation',
+                        point.colorClass,
+                      )}
                       style={colorStyle}
-                      aria-hidden="true"
+                      role="img"
+                      aria-label={point.tooltip}
+                      tabIndex={0}
+                      focusable="true"
                       pointerEvents="stroke"
                     />
                     <circle
@@ -1601,8 +1625,8 @@ export default function FunctionGraph({
                       vectorEffect="non-scaling-stroke"
                       className={point.colorClass}
                       style={colorStyle}
-                      aria-label={point.tooltip}
-                      pointerEvents="all"
+                      aria-hidden="true"
+                      pointerEvents="none"
                     />
                   </g>
                   <AnnotationTooltip
