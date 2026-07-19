@@ -9,7 +9,7 @@ export function baseOptions(): BaseLayoutProps {
       title: (
         <>
           <Image src={favicon} alt="favicon" width={20} height={20} loading="eager" />
-          <span className="font-medium max-sm:hidden">{appName}</span>
+          <span className="font-medium">{appName}</span>
         </>
       ),
     },
