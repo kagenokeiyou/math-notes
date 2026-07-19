@@ -208,15 +208,15 @@ const TICK_BASELINE_OFFSET = 4
 const PLOT_EDGE_PADDING = 3
 
 const DEFAULT_TICK_COUNT = 8
-const MAX_TICK_COUNT = 2000
+const MAX_TICK_COUNT = 1000
 
 // Tooltips are CSS-only, so the graph needs no client-side state. The hit line
 // is wider than the visible line to make a thin reference line easy to hover.
-const TOOLTIP_WIDTH = 200
+const TOOLTIP_WIDTH = 128
 const TOOLTIP_HEIGHT = 64
 const TOOLTIP_OFFSET = 8
-const ANNOTATION_HIT_WIDTH = 12
-const TOUCH_ANNOTATION_HIT_WIDTH = 32
+const ANNOTATION_HIT_WIDTH = 8
+const TOUCH_ANNOTATION_HIT_WIDTH = 24
 
 const SERIES_COLORS = [
   'text-blue-600 dark:text-blue-400',
@@ -1419,6 +1419,12 @@ export default function FunctionGraph({
                 stroke-width: ${TOUCH_ANNOTATION_HIT_WIDTH};
               }
             }
+
+            #${graphId} .function-graph-hit-line:focus,
+            #${graphId} .function-graph-hit-point:focus {
+              outline: none;
+              -webkit-tap-highlight-color: transparent;
+            }
           `}</style>
 
           {/* Structural grid and axes are drawn before annotations. */}
@@ -1599,7 +1605,7 @@ export default function FunctionGraph({
                       cx={anchorX}
                       cy={anchorY}
                       r={Math.max(point.size, ANNOTATION_HIT_WIDTH / 2)}
-                      fill="none"
+                      fill="transparent"
                       stroke="currentColor"
                       strokeOpacity="0.001"
                       strokeWidth={ANNOTATION_HIT_WIDTH}
@@ -1613,7 +1619,7 @@ export default function FunctionGraph({
                       aria-label={point.tooltip}
                       tabIndex={0}
                       focusable="true"
-                      pointerEvents="stroke"
+                      pointerEvents="all"
                     />
                     <circle
                       cx={anchorX}
